@@ -1,0 +1,248 @@
+# 패키지 불러오기
+library(tidyverse)
+library(ca)
+library(MASS)
+library(igraph)
+library(proxy)
+library(gridExtra)
+library(RColorBrewer)
+library(FactoMineR)
+library(factoextra)
+library(cluster)
+library(mclust)
+library(clValid)
+library(NbClust)
+
+
+# 1, 대응 분석
+
+
+# 분할표 만들기
+foreigner<-matrix(c(68,119,26,7,
+         20,84,17,94,
+         15,54,14,10,
+         5,29,14,16), byrow = TRUE, nrow = 4)
+dimnames(foreigner)<-list(eye=c('BROWN', 'BLUE', 'HAZEL', 'GREEN'),
+                          hair=c('black', 'brown', 'red', 'blond'))
+
+Nxy<-as.table(foreigner)
+addmargins(Nxy)
+
+# 카이제곱 독립성 검정
+H<-chisq.test(Nxy, correct = FALSE)
+H 
+# => p-value가 2.2e-16 보다 작아서 alpha= 0.05보다 작으므로 H0 (눈동자색과 머리카락색은 독립이다.) 를 기각한다.
+
+cbind(H$observed, H$expected, H$residuals) #실제 원 빈도, 기대빈도, 잔차
+
+# 모자이크 그림 그리기
+par(mfrow=c(2,2), mar=c(2,1,1,1))
+
+# 1) x축 변수와 y축 변수의 모자이크 그림
+mosaicplot(Nxy, color=TRUE)
+
+# 2) x축 변수와 y축 변수의 모자이크 그림 (잔차를 색으로 표현)
+mosaicplot(H$observed, color=TRUE, shade = TRUE)
+
+# 3) 기대빈도의 모자이크 그림 (독립일 때)
+mosaicplot(H$expected, color=TRUE)
+
+# 4) spine plot (x축이 행, y축이 열)
+spineplot(Nxy, main = 'Spine plot')
+
+# => 모자이크 그림을 그렸을 때 예를 들어 눈동자가 갈색인 사람은 많은 편이고 눈동자 색이 갈색이면 머리카락 색도 갈색인 경우가 많다.
+# => 눈동자 색이 초록색인 경우는 별로 없는데 눈동자가 초록색인 경우에 머리가 검은색인 경우는 매우 드물다. 
+# => 독립인 경우 3)번처럼 나와야 하는데 그렇게 나오지 않는다. 카이제곱 독립성 검정에서 증명했듯이 눈동자색과 머리카락색은 독립이 아니다.(서로 관련이 있다.)
+
+# 관성표 설명
+Mca<-ca(Nxy)
+Mca
+# => 주관성표 (아이겐값, 특이값 = 정준상관계수의 제곱) 가 확인된다. dimension1이 (첫번째 짝, 축) 이 89.37%의 설명력을 가진다.
+# => ROWS 쪽이 U, COLUMS 쪽이 V 가 됨
+
+# 대응분석에 대한 행렬도
+par(mfrow=c(1,1))
+plot(Mca)
+# => Dimension1 (x축)은 전체의 89.37% 를 설명하고 Dimension2 (y축)은 전체의 9.52% 를 설명한다.
+# => 먼저 눈이 파란색 or 초록색 - 그 외 (갈색, 헤이즐색) 눈색깔 / 머리카락색이 금발과 그 외 (검정색, 갈색, 빨간색) 의 대비되는 관계를 보여준다.
+# => 눈이 파란색과 머리가 금발인 것은 같이 움직인다. (눈이 파라면 머리가 금발인 경우가 많다.)
+# => 눈이 갈색이면 머리가 검정색인 경우가 많다.
+# => 중요한 축이 더 길게 나온다. 즉, x축이 y축보다 훨씬 중요하다.
+
+
+
+# 2. MDS
+
+# 데이터 불러오기
+DF<-read.csv('ramyun2sas.csv',na.string='.')
+head(DF)
+str(DF)
+dim(DF)
+# =>영양에 관련된 변수들 (kcal~natrium 까지)에 NA 값이 있는 것이 확인된다.
+
+# 데이터 정리
+ramyun<-DF[c(1,8:16)] #필요 열만 추출
+ramyun <- na.omit(ramyun) # 결측제거
+head(ramyun)
+dim(ramyun) 
+#=> 이전과 달리 8행이 제거된 것이 확인된다.
+
+# 표준화
+ramyun_z<-scale(ramyun[,-1], center=TRUE, scale=TRUE)
+rownames(ramyun_z)<-ramyun$pname
+head(ramyun_z)
+
+# 거리행렬 만들기
+ramyun_dist<-dist(ramyun_z,
+                  method = 'euclidean',
+                  diag=TRUE,
+                  upper=FALSE,
+                  by_rows=TRUE)
+round(ramyun_dist, digits = 3)
+
+# metric MDS
+ramyun_mds<-cmdscale(ramyun_dist, k=2, eig=TRUE)
+ramyun_mds
+
+# => 2차원으로 지정했더니 22X22 거리행렬에서 22X2 행렬로 변했다.
+# => GOF1를 확인했을 때 전체의 71.77 % 만큼 복원된다.
+
+# 시각화
+x<-ramyun_mds$points[,1] # x축 좌표 생성
+y<-ramyun_mds$points[,2] # y축 좌표 생성
+plot(x,y,pch=8, col='red', xlab='Dimension1', ylab='Dimension 2') # 산점도 그리기
+abline(v=0, h=0, lty=2) # 참조선 추가
+text(x,y,pos=3, labels=ramyun$pname, col='blue')
+# => 유사한 라면들은 뭉쳐있고 유사하지 않은 라면들은 흩어져 있다.
+
+
+g<-graph.full(nrow(ramyun_z))
+ramyun_name<-ramyun$pname
+V(g)$label<-ramyun_name
+layout<-layout.mds(g, dist=as.matrix(ramyun_dist))
+plot(g, layout=layout, vertex.size=2)
+# => 유사한 라면들은 뭉쳐있고 유사하지 않은 라면들은 흩어져 있다.
+
+
+# 3. 군집 분석
+
+# 거래행렬 시각화
+fviz_dist(ramyun_dist)
+# => 대강 유사한 (거리가 가까운) 라면들이 무엇인지 알 수 있다.
+
+# 자동모형선택
+m<-c('kmeans', 'hclust', 'mclust')
+clvintr<-clValid(ramyun_z,
+                 nClust = 2:5,
+                 clMethods = m,
+                 validation = 'intern',
+                 metric='euc',
+                 method ='ward') #와드 연결법으로 보기
+summary(clvintr)
+# => Connectivity 기준 제일 좋은 모형은 kmeans고 군집 개수는 2개이다.
+# => Dunn 기준 제일 좋은 모형은 kmeans고 군집 개수는 5개이다.
+# => Silhouette 기준 제일 좋은 모형은 kmeans고 군집 개수는 5개이다.
+
+par(mfrow=c(2,2))
+plot(clvintr)
+par(mfrow=c(1,1))
+
+
+## 1) K-menas 클러스터링
+
+# Kmeans cluster 의 최적 k수 찾기
+set.seed(1234)
+g1<-fviz_nbclust(ramyun_z, kmeans, method='wss')
+g2<-fviz_nbclust(ramyun_z, kmeans, method='sil')
+g3<-fviz_nbclust(ramyun_z, kmeans, method='gap')
+grid.arrange(grobs=list(g1,g2,g3), nc=3)
+# => wss 그래프는 값이 작아지는, 즉 확 꺾이는 knee 를 찾아야 한다.
+# => sil 그래프는 값이 커지는, 즉 확 커지는 곳이 최적 k이다.
+# => 세 그래프 기준으로 보았을 때 최적 k의 수는 4이다.
+
+# Kmeans cluster
+set.seed(1234)
+Mk<-kmeans(ramyun_z, c=4)
+Mk
+
+# 2차원 군집 시각화
+fviz_cluster(Mk, data=ramyun_z,
+             ellipse.type='euclid',
+             star.plot=TRUE,
+             repel=TRUE,
+             palette='jama')
+# => Dimension 1은 전체 분산의 53.9 %, Dimension 2 는 전체 분산의 17.8 % 만큼 설명 가능하다. 차원 2개로 총 71.8 % 설명가능하다.
+# => 총 4개의 그룹으로 묶였다. 그런데 최적 k의 수가 나왔지만 4번째 군집은' 오징어 짬뽕컵' 만 분류된다. 이상치로 보거나 군집2에 가깝다고 해석하는게 좋다.
+
+
+## 2) hclust
+
+# hclust cluster 의 최적 k수 찾기
+set.seed(1234)
+g4<-fviz_nbclust(ramyun_z, hcut, method='wss',
+                 hcut_func='hclust', hc_method='ward.D2', hc_metric='euc')
+g5<-fviz_nbclust(ramyun_z, hcut, method='sil',
+                 hcut_func='hclust', hc_method='ward.D2', hc_metric='euc')
+g6<-fviz_nbclust(ramyun_z, hcut, method='gap',
+                 hcut_func='hclust', hc_method='ward.D2', hc_metric='euc')
+grid.arrange(grobs=list(g4,g5,g6), nc=3)
+
+# => wss 그래프는 값이 작아지는, 즉 확 꺾이는 knee 를 찾아야 한다.
+# => sil 그래프는 값이 커지는, 즉 확 커지는 곳이 최적 k이다. 여기서는 5이다.
+# => gap 그래프 기준으로 보았을 때 최적 k의 수는 7이다. => 데이터에 비해 군집의 수가 너무 많다.
+# => 데이터 개수에 비해 군집의 수가 너무 많다는 생각이 들긴 하지만 일단 군집의 수를 5로 잡았다.
+
+# 덴드로그램 그리기
+par(mfrow=c(1,1))
+Mhw<-hclust(ramyun_dist, method = 'ward.D2')
+plot(Mhw, hang=-1)
+rect.hclust(Mhw, k=5)
+# => 나머지는 적절하게 분류된 것 같은데 '진라면 매운맛'이 군집 1개를 이루고 있다. 
+
+khhw<-cutree(Mhw, k=5)
+fviz_dend(Mhw, k=5, rect=TRUE, palette = 'jama')
+# => 그래프가 조금 더 보기 좋게 바뀌었다.
+
+# hclust 2차원 그래프 시각화
+fviz_cluster(list(data=ramyun_z, cluster=khhw),
+             palette='jama',
+             ellipse.type = 'euclid',
+             star.plot=TRUE,
+             repel = TRUE)
+# => Dimension 1은 전체 분산의 53.9 %, Dimension 2 는 전체 분산의 17.8 % 만큼 설명 가능하다. 차원 2개로 총 71.8 % 설명가능하다.
+# => 총 5개의 그룹으로 묶였다. 그런데 최적 k의 수가 나왔지만 5번째 군집은'진라면 매운맛' 만 분류된다. 이상치로 보거나 군집1에 가깝다고 해석하는게 좋다.
+
+
+## 3) Mclust
+
+# Mclust 의 최적 k수 찾기(자체 BIC 사용)
+Mm<-Mclust(ramyun_z, G=1:5)
+summary(Mm)
+# => 알아서 그룹 k는 2개이고 각 군집에 각각 16개의 라면, 6개의 라면이 들어간다는 결과가 나온다.
+
+# 모형 선택
+plot(Mm, what='BIC')
+# => K=2일때 VEV 모형이 가장 좋은 것으로 확인된다.
+
+plot(Mm, what='class')
+# => 산점도 행렬과 구성분표 (k=2이다), 레이블을 보여준다.
+
+fviz_mclust(Mm, what='BIC', palette='jco')
+# => K=2일때 VEV 모형이 가장 좋은 것으로 확인된다.
+
+# 각 군집 소속확률
+round(Mm$z, 4)
+# => 각 군집에 속할 확률이 거의 다 1 or 0으로 나온다. 즉, 모든 라면이 애매한 거 없이 확실하게 분류되었다는 것이다.
+
+# 군집 레이블
+Mm$class
+
+# hclust 2차원 그래프 시각화
+fviz_cluster(Mm,
+             palette='jama',
+             ellipse.type = 'euclid',
+             star.plot=TRUE,
+             repel = TRUE)
+# => 군집2는 신기하게도 다 컵라면이다. 
+# => 군집 1에는 왕뚜껑, 육개장 큰사발, 짜파게티큰사발 이외에 모두 봉지라면이다.
+
